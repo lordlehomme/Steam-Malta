@@ -8,11 +8,13 @@ import { Label } from '@/components/ui/label';
 import { CreditCard, Smartphone, ShoppingBag } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 
 const Checkout = () => {
   const { cart, totalPrice, clearCart } = useCart();
   const navigate = useNavigate();
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'apple' | 'google'>('card');
+  const [isProcessing, setIsProcessing] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -41,7 +43,7 @@ const Checkout = () => {
     );
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Basic validation
@@ -55,14 +57,38 @@ const Checkout = () => {
       return;
     }
 
-    // Simulate payment processing
-    toast.success('Processing payment...');
+    setIsProcessing(true);
+    toast.loading('Processing payment with Wise...');
     
-    setTimeout(() => {
-      toast.success('Order placed successfully!');
-      clearCart();
-      navigate('/');
-    }, 2000);
+    try {
+      const { data, error } = await supabase.functions.invoke('wise-payment', {
+        body: {
+          amount: totalWithVAT,
+          currency: 'EUR',
+          customerName: `${formData.firstName} ${formData.lastName}`,
+          customerEmail: formData.email,
+          paymentMethod: paymentMethod,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.success) {
+        toast.dismiss();
+        toast.success('Payment successful! Order placed.');
+        console.log('Transaction ID:', data.transactionId);
+        clearCart();
+        navigate('/');
+      } else {
+        throw new Error(data?.error || 'Payment failed');
+      }
+    } catch (error) {
+      console.error('Payment error:', error);
+      toast.dismiss();
+      toast.error(`Payment failed: ${error.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -300,8 +326,14 @@ const Checkout = () => {
                   </span>
                 </div>
 
-                <Button type="submit" variant="premium" size="xl" className="w-full">
-                  Complete Purchase
+                <Button 
+                  type="submit" 
+                  variant="premium" 
+                  size="xl" 
+                  className="w-full"
+                  disabled={isProcessing}
+                >
+                  {isProcessing ? 'Processing...' : 'Complete Purchase'}
                 </Button>
 
                 <p className="text-xs text-center text-muted-foreground">
